@@ -1,0 +1,140 @@
+# Load the Python Standard and DesignScript Libraries
+import sys
+import os
+import clr
+import time
+clr.AddReference('ProtoGeometry')
+clr.AddReference('RevitAPI')
+clr.AddReference('RevitServices')
+clr.AddReference('RevitNodes')
+clr.AddReference('System.Windows.Forms')
+from Autodesk.Revit.DB import *
+from Autodesk.DesignScript.Geometry import *
+from RevitServices.Persistence import DocumentManager
+from Autodesk.Revit.ApplicationServices import *
+from RevitServices.Transactions import TransactionManager
+
+doc = DocumentManager.Instance.CurrentDBDocument
+uiapp = DocumentManager.Instance.CurrentUIApplication
+app = uiapp.Application
+
+# Declare inputs as variables.
+dataEnteringNode = IN
+modelPath = IN[0]
+categoryIn = UnwrapElement(IN[1])
+familyName = IN[2]
+allType = IN[3]
+familyType = IN[4]
+paramIn = IN[5]
+value = IN[6]
+arglist = []
+
+
+def asdf(modelPath, familyName, value, paramIn, strItr, categoryIn, paramType):
+
+	list = []
+	filtList = []
+	param = []
+	paramVal = []
+	
+	filePath = os.path.join(os.path.join(os.environ['USERPROFILE']), 'Documents\EditParameter.rvt')
+	
+	if os.path.exists(filePath):
+		os.remove(filePath)
+	
+	localPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(filePath)
+	localFile = WorksharingUtils.CreateNewLocal(modelPath, localPath)
+	options = OpenOptions()
+	linkedDoc = app.OpenDocumentFile(localPath, options)
+	elementS = FilteredElementCollector(linkedDoc).OfCategoryId(categoryIn.Id).WhereElementIsElementType()
+	
+	# filter list to include only the specified type
+	if not allType:
+		#unwrap the element
+		for elem in elementS:
+			list.append(UnwrapElement(elem))
+		
+		# filter familtypes given the input 
+		for i in list:
+			if i.FamilyName == familyName and Element.Name.GetValue(i) == familyType:
+				filtList.Add(i)
+				
+	# fiter elements by family name	
+	if allType:
+		# unwrap elements
+		for elem in elementS:
+			list.append(UnwrapElement(elem))
+	
+		for i in list:
+			if i.FamilyName == familyName:
+				filtList.Add(i)
+	
+	count = 0
+	argList = []
+	argList.append(strItr)
+	for i in filtList:
+		params = linkedDoc.GetElement(i.Id)
+		#param.Add(params)
+		pVal = params.LookupParameter(paramIn)
+		
+		TransactionManager.Instance.EnsureInTransaction(linkedDoc)
+		try:            
+	     #Make change to type parameter
+			pVal.Set(value)
+		except Exception,e:
+	     #Maybe Throw an Error Message...
+			argList.Add("ERROR: " + str(e))
+		TransactionManager.Instance.ForceCloseTransaction()
+		
+
+	
+	while linkedDoc.IsModifiable:
+		argList.append("Stopped on iteration: " + str(count) + ". Transaction may be incomplete")
+		time.sleep(2)
+
+	if not linkedDoc.IsModifiable:
+		twc = TransactWithCentralOptions();
+		rOptions = RelinquishOptions(False);
+		rOptions.StandardWorksets = True
+		rOptions.ViewWorksets = True
+		rOptions.FamilyWorksets = True
+		rOptions.UserWorksets = True
+		rOptions.CheckedOutElements = True
+		swc = SynchronizeWithCentralOptions()
+		swc.SetRelinquishOptions(rOptions)
+		swc.SaveLocalBefore = True
+		swc.SaveLocalAfter = True
+		argList.Add(str(linkedDoc))
+		linkedDoc.SynchronizeWithCentral(twc, swc)
+		
+		# Add file path of synced do to list
+		argList.Add("Doc Synced to: " + ModelPathUtils.ConvertModelPathToUserVisiblePath(linkedDoc.GetWorksharingCentralModelPath()))
+		
+		time.sleep(1)
+		linkedDoc.Close(True)
+	count += 1
+	return argList
+	
+# implement the function in for loop
+# to iterate though each link
+countL = []	
+i = 1
+for model in IN[0]:
+	itr = str(i)
+	i+=1
+	countL.Add(asdf(model, familyName, value, paramIn, itr, categoryIn, allType))
+	# asdf(modelPath, familyName, value, paramIn, strItr, categoryIn, paramType):
+
+#reload revit links	
+rvtLinkTypes = FilteredElementCollector(doc).OfClass(RevitLinkType).ToElements()
+	
+for rlt in rvtLinkTypes:
+	if not rlt.IsNestedLink:
+		rlt.Reload()
+
+
+
+	#listV.Add(pVal)
+# Assign your output to the OUT variable.
+# out values dont matter, just have these here to check their values
+OUT = countL
